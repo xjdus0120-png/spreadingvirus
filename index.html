@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>응급실 공기 감염 위험 비교 시뮬레이터</title>
+<style>
+  /* 빔프로젝터에서도 잘 보이도록 글자를 크게, 색 대비를 강하게 */
+  body {
+    margin: 0;
+    font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    font-size: 18px;
+    color: #111;
+    background: #f2f4f7;
+    padding-bottom: 90px; /* 하단 고정 문구에 가리지 않도록 */
+  }
+  header { background: #1d3557; color: #fff; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 28px; }
+  header p { margin: 6px 0 0; font-size: 17px; opacity: 0.9; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  section {
+    background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  h2 { margin: 0 0 12px; font-size: 23px; color: #1d3557; }
+
+  /* 입력값 */
+  #inputs_main { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); } /* 위쪽 4개는 한 줄에 */
+  details { margin-top: 14px; border: 2px solid #c5cdd8; border-radius: 8px; padding: 8px 14px; }
+  summary { font-size: 20px; font-weight: bold; color: #1d3557; cursor: pointer; }
+  details .inputs { margin-top: 10px; }
+  .inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px 24px; }
+  .row { display: flex; flex-direction: column; }
+  .row label { font-weight: bold; }
+  .row .line { display: flex; align-items: center; gap: 10px; }
+  .row input[type=range] { flex: 1; height: 28px; }
+  .row input[type=number] { width: 140px; font-size: 18px; padding: 4px; }
+  .row input[type=checkbox] { width: 26px; height: 26px; }
+  .row .val { min-width: 110px; font-weight: bold; color: #c1121f; text-align: right; }
+  .note { font-size: 15px; color: #555; }
+
+  /* 결과 카드 */
+  #cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .card { border: 3px solid #1d3557; border-radius: 10px; padding: 12px; text-align: center;
+          display: flex; flex-direction: column; justify-content: space-between; } /* 숫자 높이 맞추기 */
+  .card .name { font-size: 19px; font-weight: bold; }
+  .card .num { font-size: 46px; font-weight: bold; color: #c1121f; margin-top: 6px; }
+  #warning {
+    display: none; background: #ffe0e0; border: 3px solid #c1121f; color: #8b0000;
+    font-weight: bold; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 20px;
+  }
+
+  /* 버튼 */
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+  .btns b { min-width: 120px; }
+  button {
+    font-size: 18px; padding: 8px 14px; border: 2px solid #1d3557; background: #fff;
+    border-radius: 8px; cursor: pointer; font-family: inherit;
+  }
+  button:hover { background: #1d3557; color: #fff; }
+
+  /* 그래프 */
+  canvas { width: 100%; height: 400px; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 8px; font-size: 17px; }
+  .legend span.sw { display: inline-block; width: 34px; height: 0; border-top-width: 4px; vertical-align: middle; margin-right: 6px; }
+
+  /* 테스트 표 */
+  table { border-collapse: collapse; width: 100%; font-size: 16px; margin-top: 10px; }
+  th, td { border: 1px solid #999; padding: 5px 8px; text-align: center; }
+  th { background: #e3e8ef; }
+  .pass { color: #0a7d22; font-weight: bold; }
+  .fail { color: #c1121f; font-weight: bold; }
+
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0; background: #fff3c4;
+    border-top: 3px solid #d4a017; padding: 12px 20px; font-size: 18px; font-weight: bold; text-align: center;
+  }
+  @media (max-width: 700px) { #cards { grid-template-columns: 1fr; } .card .num { font-size: 36px; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>응급실 공기 감염 위험 비교 시뮬레이터</h1>
+  <p>감염자 1명이 있을 때 환기 · 입구 분류 · 격리 · 이동식 후드가 위험을 얼마나 줄이는지 설계끼리 비교합니다.</p>
+</header>
+
+<main>
+  <section>
+    <h2>설계 고르기</h2>
+    <div class="inputs" id="inputs_main"></div>
+
+    <!-- 처음에는 접혀 있는 영역: 클릭하면 펼쳐짐 -->
+    <details>
+      <summary>인원 · 시간 바꾸기</summary>
+      <div class="inputs" id="inputs_people"></div>
+    </details>
+    <details>
+      <summary>가정값 바꾸기</summary>
+      <div class="inputs" id="inputs_assume"></div>
+      <p class="note">호흡량 p = 0.48 m³/h (고정)</p>
+    </details>
+  </section>
+
+  <section>
+    <h2>프리셋</h2>
+    <div class="btns">
+      <b>두 구역 모델</b>
+      <button onclick="applyPreset('A')">A 기준</button>
+      <button onclick="applyPreset('B')">B 환기 2배</button>
+      <button onclick="applyPreset('C')">C 입구 분류</button>
+      <button onclick="applyPreset('D')">D 국소 배기</button>
+      <button onclick="applyPreset('E')">E 분류+국소 배기</button>
+      <button onclick="applyPreset('F')">F E+환기 2배</button>
+    </div>
+    <p class="note">프리셋은 인원(근거리 2명, 원거리 28명), 환기 횟수, 입구 분류, 후드 적용률만 바꿉니다. 선별 성공률 s와 가정값은 그대로이니, C·E·F는 s 슬라이더로 성공률을 정하세요.</p>
+  </section>
+
+  <section>
+    <h2>결과</h2>
+    <div id="warning"></div>
+    <div id="cards">
+      <div class="card"><div class="name">옆자리 감염 확률 P근</div><div class="num" id="outNear">—</div></div>
+      <div class="card"><div class="name">먼 자리 감염 확률 P원</div><div class="num" id="outFar">—</div></div>
+      <div class="card"><div class="name">전체 감염 확률 P<br><small>(인원수 가중 평균)</small></div><div class="num" id="outAll">—</div></div>
+      <div class="card"><div class="name">예상 2차 감염자 수 N</div><div class="num" id="outN">—</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>그래프 1. 환기를 늘리면?</h2>
+    <canvas id="g1"></canvas>
+    <div class="legend" id="lg1"></div>
+  </section>
+
+  <section>
+    <h2>그래프 2. 감염자를 놓치면?</h2>
+    <canvas id="g2"></canvas>
+    <div class="legend" id="lg2"></div>
+    <p class="note">범례의 숫자는 각 선의 최댓값(가장 나쁜 경우)입니다. 분류를 쓰지 않는 A·B·D는 선별 성공률과 상관없어 수평선입니다.</p>
+  </section>
+
+  <section>
+    <h2>테스트</h2>
+    <button onclick="runTests()">테스트 실행</button>
+    <span class="note">슬라이더와 상관없이 정해진 값으로 계산합니다. 확률은 % 소수 첫째 자리, N은 소수 둘째 자리로 반올림한 값이 기댓값과 ±0.01 이내면 통과입니다.</span>
+    <div id="testResult"></div>
+  </section>
+</main>
+
+<footer>공기 전파만 계산하는 단순 모델로 상대 비교용입니다. β, 선별 성공률, 누출률, 후드 포집률은 가정값입니다.</footer>
+
+<!-- ===================== 계산 부분 (모델) ===================== -->
+<script id="model">
+const p = 0.48; // 호흡량 (m³/h): 한 사람이 1시간에 들이마시는 공기 양
+
+// 한 경우의 계산
+// cc: 후드 포집률(0~1), tN: 근거리 사람이 노출되는 시간(h), tF: 원거리 사람이 노출되는 시간(h)
+// x: 입력값 묶음 (확률·비율은 0~1로 바꾼 값)
+function calc(cc, tN, tF, x) {
+  const G = x.q * (1 - cc);           // 공기 중으로 실제 퍼지는 배출량 (quanta/h) = 배출량 × (후드가 못 잡은 비율)
+  const Q = x.a * x.V;                // 환기량 (m³/h) = 환기 횟수(회/h) × 부피(m³)
+  const Cfar = G / Q;                 // 원거리 농도 (quanta/m³) = 배출량 ÷ 환기량
+  const Cnear = G / Q + G / x.beta;   // 근거리 농도 (quanta/m³) = 원거리 농도 + 감염자 주변에 더 쌓인 농도
+  const Pnear = 1 - Math.exp(-p * Cnear * tN); // 근거리 1명 감염 확률 (0~1), p×C×t = 들이마신 quanta 수
+  const Pfar  = 1 - Math.exp(-p * Cfar * tF);  // 원거리 1명 감염 확률 (0~1)
+  const N = x.nN * Pnear + x.nF * Pfar;        // 예상 2차 감염자 수 (명) = 인원 × 확률의 합
+  return { Pnear: Pnear, Pfar: Pfar, N: N };
+}
+
+// 두 결과를 비율 w : (1 − w)로 섞기 (P근, P원, N 모두 같은 방식)
+function mix(r1, r2, w) {
+  return {
+    Pnear: w * r1.Pnear + (1 - w) * r2.Pnear,
+    Pfar:  w * r1.Pfar  + (1 - w) * r2.Pfar,
+    N:     w * r1.N     + (1 - w) * r2.N
+  };
+}
+
+// 후드 포집률 cc일 때의 결과 (입구 분류 반영)
+function one(cc, x) {
+  const missed = calc(cc, x.T, x.T, x);                       // 놓쳤을 때: 모두 T시간 노출
+  if (!x.triage) return missed;                                // 분류를 안 쓰면 항상 놓친 경우
+  const found = calc(cc, x.tb, x.tb + x.f * (x.T - x.tb), x);  // 찾았을 때: 격리 전 tb시간 + 격리 후 새는 공기 f만큼
+  return mix(found, missed, x.s);                              // s 확률로 찾고, (1 − s) 확률로 놓침
+}
+
+// 최종 결과: 후드 적용률 h만큼은 후드 있음, 나머지는 후드 없음
+function model(x) {
+  return mix(one(x.c, x), one(0, x), x.h);
+}
+
+// 전체 감염 확률 P: P근과 P원을 인원수로 가중 평균 (0~1)
+// P = (nN × P근 + nF × P원) ÷ (nN + nF) = N ÷ 전체 인원
+function overallP(r, x) {
+  const people = x.nN + x.nF;        // 전체 인원 (명)
+  if (people === 0) return null;     // 사람이 없으면 계산할 수 없음
+  return (x.nN * r.Pnear + x.nF * r.Pfar) / people;
+}
+
+// 계산할 수 없는 입력이면 경고 문구, 괜찮으면 빈 문자열
+function checkInputs(x) {
+  if (!(x.V > 0)) return "공간 부피 V는 0보다 커야 합니다.";
+  if (!(x.beta > 0)) return "근거리 공기 교환량 β는 0보다 커야 합니다.";
+  if (x.triage && x.tb > x.T) return "격리까지 걸리는 시간 tb가 총 체류 시간 T보다 깁니다.";
+  return "";
+}
+
+// 설계 A~F (그래프 2, 프리셋, 테스트에서 함께 사용)
+const DESIGNS = {
+  A: { name: "A 기준",          a: 3, triage: false, h: 0 },
+  B: { name: "B 환기 2배",       a: 6, triage: false, h: 0 },
+  C: { name: "C 입구 분류",       a: 3, triage: true,  h: 0 },
+  D: { name: "D 국소 배기",       a: 3, triage: false, h: 1 },
+  E: { name: "E 분류+국소 배기",   a: 3, triage: true,  h: 1 },
+  F: { name: "F E+환기 2배",     a: 6, triage: true,  h: 1 }
+};
+
+// 테스트 기본값 (비율은 0~1)
+const TEST_BASE = { q: 100, V: 900, beta: 600, tb: 1, T: 4, f: 0, c: 0.5,
+                    a: 3, nN: 0, nF: 30, triage: false, s: 0, h: 0 };
+const TWO = { nN: 2, nF: 28 };            // 두 구역 모델 인원
+const TRI = { nN: 0, nF: 30, a: 3, triage: true }; // 1차 모델 + 입구 분류
+
+// 1차 모델 ①~⑤ (근거리 0명, 분류 끄기, 후드 0%): 테스트에서만 사용
+const FIRST_ORDER = {
+  "①": { nN: 0, nF: 30, a: 3, T: 4, triage: false, h: 0 },
+  "②": { nN: 0, nF: 30, a: 6, T: 4, triage: false, h: 0 },
+  "③": { nN: 0, nF: 30, a: 3, T: 2, triage: false, h: 0 },
+  "④": { nN: 0, nF: 15, a: 3, T: 4, triage: false, h: 0 },
+  "⑤": { nN: 0, nF: 15, a: 6, T: 2, triage: false, h: 0 }
+};
+
+// 테스트 목록: key는 확인할 값, exp는 기댓값 (확률은 %)
+const TESTS = [
+  { no: "1",  desc: "1차 ① 환기 3",                set: FIRST_ORDER["①"], key: "Pfar", exp: 6.9 },
+  { no: "1",  desc: "1차 ① 환기 3",                set: FIRST_ORDER["①"], key: "N", exp: 2.06 },
+  { no: "2",  desc: "1차 ② 환기 6",                set: FIRST_ORDER["②"], key: "N", exp: 1.05 },
+  { no: "3",  desc: "1차 ③ 환기 3, T 2",            set: FIRST_ORDER["③"], key: "N", exp: 1.05 },
+  { no: "4",  desc: "1차 ④ 환기 3, nF 15",          set: FIRST_ORDER["④"], key: "N", exp: 1.03 },
+  { no: "5",  desc: "1차 ⑤ 환기 6, T 2, nF 15",     set: FIRST_ORDER["⑤"], key: "N", exp: 0.26 },
+  { no: "6",  desc: "1차+분류, s 30%",         set: Object.assign({}, TRI, { s: 0.3 }), key: "N", exp: 1.60 },
+  { no: "6",  desc: "1차+분류, s 90%",         set: Object.assign({}, TRI, { s: 0.9 }), key: "N", exp: 0.68 },
+  { no: "6",  desc: "1차+분류, s 100%",        set: Object.assign({}, TRI, { s: 1 }), key: "N", exp: 0.53 },
+  { no: "7",  desc: "1차+분류, s 100%, f 50%",  set: Object.assign({}, TRI, { s: 1, f: 0.5 }), key: "N", exp: 1.30 },
+  { no: "7",  desc: "1차+분류, s 100%, f 100%", set: Object.assign({}, TRI, { s: 1, f: 1 }), key: "N", exp: 2.06 },
+  { no: "8",  desc: "두 구역 A",              set: Object.assign({}, TWO, DESIGNS.A), key: "Pnear", exp: 32.4 },
+  { no: "8",  desc: "두 구역 A",              set: Object.assign({}, TWO, DESIGNS.A), key: "Pfar", exp: 6.9 },
+  { no: "8",  desc: "두 구역 A",              set: Object.assign({}, TWO, DESIGNS.A), key: "N", exp: 2.57 },
+  { no: "9",  desc: "두 구역, 환기 24, 분류 끄기", set: Object.assign({}, TWO, { a: 24, triage: false, h: 0 }), key: "Pnear", exp: 28.0 },
+  { no: "10", desc: "두 구역 B",              set: Object.assign({}, TWO, DESIGNS.B), key: "N", exp: 1.58 },
+  { no: "11", desc: "두 구역 D",              set: Object.assign({}, TWO, DESIGNS.D), key: "Pnear", exp: 17.8 },
+  { no: "11", desc: "두 구역 D",              set: Object.assign({}, TWO, DESIGNS.D), key: "N", exp: 1.33 },
+  { no: "12", desc: "두 구역 C, s 90%",        set: Object.assign({}, TWO, DESIGNS.C, { s: 0.9 }), key: "N", exp: 0.87 },
+  { no: "13", desc: "두 구역 E, s 90%",        set: Object.assign({}, TWO, DESIGNS.E, { s: 0.9 }), key: "N", exp: 0.44 },
+  { no: "14", desc: "두 구역 F, s 90%",        set: Object.assign({}, TWO, DESIGNS.F, { s: 0.9 }), key: "N", exp: 0.27 },
+  { no: "15", desc: "두 구역, 환기 3, h 50%",   set: Object.assign({}, TWO, { a: 3, triage: false, h: 0.5 }), key: "Pnear", exp: 25.1 },
+  { no: "15", desc: "두 구역, 환기 3, h 80%",   set: Object.assign({}, TWO, { a: 3, triage: false, h: 0.8 }), key: "Pnear", exp: 20.7 }
+];
+
+// 테스트 하나 계산: 통과 여부와 값을 돌려줌
+function runOneTest(t) {
+  const x = Object.assign({}, TEST_BASE, t.set);
+  const r = model(x);
+  const isProb = (t.key !== "N");
+  const raw = isProb ? r[t.key] * 100 : r[t.key];          // 확률은 %로 바꿈
+  const digits = isProb ? 1 : 2;                            // 표시 자릿수
+  const rounded = Number(raw.toFixed(digits));              // 기댓값과 같은 자릿수로 반올림
+  const pass = Math.abs(rounded - t.exp) <= 0.01 + 1e-9;    // 오차 ±0.01 (컴퓨터 계산 오차 여유 1e-9)
+  return { raw: raw, rounded: rounded, pass: pass, isProb: isProb };
+}
+</script>
+
+<!-- ===================== 화면 부분 ===================== -->
+<script>
+// 입력 칸 목록: 슬라이더의 최소·최대·간격·시작값 (비율은 % 단위로 표시)
+// group: main = 위쪽에 늘 보임, people = "인원 · 시간 바꾸기", assume = "가정값 바꾸기"
+const INPUTS = [
+  { id: "a",      group: "main",   label: "시간당 환기 횟수 a",            unit: "회/h",     min: 1,   max: 24,   step: 1,   start: 3 },
+  { id: "triage", group: "main",   label: "입구 분류 사용",                type: "check",                              start: false },
+  { id: "s",      group: "main",   label: "선별 성공률 s (가정값)",         unit: "%",        min: 0,   max: 100,  step: 5,   start: 0 },
+  { id: "h",      group: "main",   label: "후드 적용률 h",                unit: "%",        min: 0,   max: 100,  step: 5,   start: 0 },
+  { id: "nN",     group: "people", label: "근거리 인원 nN",               unit: "명",       min: 0,   max: 6,    step: 1,   start: 2 },
+  { id: "nF",     group: "people", label: "원거리 인원 nF",               unit: "명",       min: 0,   max: 50,   step: 1,   start: 28 },
+  { id: "tb",     group: "people", label: "격리까지 걸리는 시간 tb",        unit: "시간",      min: 0.5, max: 8,    step: 0.5, start: 1 },
+  { id: "T",      group: "people", label: "총 체류 시간 T",               unit: "시간",      min: 0.5, max: 8,    step: 0.5, start: 4 },
+  { id: "beta",   group: "assume", label: "근거리 공기 교환량 β (가정값)",   unit: "m³/h",     min: 100, max: 2000, step: 50,  start: 600 },
+  { id: "q",      group: "assume", label: "배출량 q",                    unit: "quanta/h", min: 10,  max: 600,  step: 10,  start: 100 },
+  { id: "V",      group: "assume", label: "공간 부피 V",                 unit: "m³",       type: "number",             start: 900 },
+  { id: "f",      group: "assume", label: "격리실 공기 누출률 f (가정값)",   unit: "%",        min: 0,   max: 100,  step: 5,   start: 0 },
+  { id: "c",      group: "assume", label: "후드 포집률 c (가정값)",         unit: "%",        min: 0,   max: 90,   step: 5,   start: 50 }
+];
+
+// 입력 칸을 화면에 만들기
+function buildInputs() {
+  INPUTS.forEach(function (it) {
+    const box = document.getElementById("inputs_" + it.group); // 들어갈 영역
+    const row = document.createElement("div");
+    row.className = "row";
+    let html = '<label for="in_' + it.id + '">' + it.label + '</label><div class="line">';
+    if (it.type === "number") {
+      html += '<input type="number" id="in_' + it.id + '" value="' + it.start + '"> <span>' + it.unit + '</span>';
+    } else if (it.type === "check") {
+      html += '<input type="checkbox" id="in_' + it.id + '"' + (it.start ? " checked" : "") + '> <span class="val" id="v_' + it.id + '"></span>';
+    } else {
+      html += '<input type="range" id="in_' + it.id + '" min="' + it.min + '" max="' + it.max +
+              '" step="' + it.step + '" value="' + it.start + '"><span class="val" id="v_' + it.id + '"></span>';
+    }
+    html += "</div>";
+    row.innerHTML = html;
+    box.appendChild(row);
+    document.getElementById("in_" + it.id).addEventListener("input", update);
+  });
+}
+
+// 화면의 입력값을 읽어 계산용 값으로 바꾸기 (% → 0~1)
+function readInputs() {
+  const g = function (id) { return Number(document.getElementById("in_" + id).value); };
+  return {
+    a: g("a"), V: g("V"), q: g("q"), beta: g("beta"), nN: g("nN"), nF: g("nF"),
+    triage: document.getElementById("in_triage").checked,
+    s: g("s") / 100, tb: g("tb"), T: g("T"),
+    f: g("f") / 100, c: g("c") / 100, h: g("h") / 100
+  };
+}
+
+// 슬라이더 옆에 현재 값 글자로 보여 주기
+function showValues() {
+  INPUTS.forEach(function (it) {
+    const span = document.getElementById("v_" + it.id);
+    if (!span) return;
+    const el = document.getElementById("in_" + it.id);
+    span.textContent = (it.type === "check") ? (el.checked ? "켜기" : "끄기") : el.value + " " + it.unit;
+  });
+}
+
+// 프리셋: 두 구역 모델 A~F (설계표에서 만들기, h는 0~1 → %로)
+function applyPreset(name) {
+  const d = DESIGNS[name];
+  document.getElementById("in_nN").value = 2;        // 근거리 2명
+  document.getElementById("in_nF").value = 28;       // 원거리 28명
+  document.getElementById("in_a").value = d.a;       // 환기 횟수
+  document.getElementById("in_triage").checked = d.triage; // 입구 분류
+  document.getElementById("in_h").value = d.h * 100; // 후드 적용률 (%)
+  update();
+}
+
+// 보기 좋은 축 최댓값 고르기 (1, 2, 5 × 10의 거듭제곱)
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p10 = Math.pow(10, Math.floor(Math.log10(v)));
+  const steps = [1, 2, 2.5, 5, 10];
+  for (let i = 0; i < steps.length; i++) {
+    if (steps[i] * p10 >= v) return steps[i] * p10;
+  }
+  return 10 * p10;
+}
+
+// 꺾은선 그래프 그리기
+// opt: { xMin, xMax, xStep, xLabel, yLabel, current(현재 x값), series:[{color, dash, points:[[x,y],…]}], message }
+function drawGraph(canvasId, opt) {
+  const cv = document.getElementById(canvasId);
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  if (opt.message) { // 계산할 수 없을 때는 안내 문구만
+    ctx.fillStyle = "#c1121f"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(opt.message, W / 2, H / 2);
+    return;
+  }
+
+  const L = 80, R = 20, T = 20, B = 60;          // 여백 (px)
+  let yMax = 0;
+  opt.series.forEach(function (s) { s.points.forEach(function (pt) { if (pt[1] > yMax) yMax = pt[1]; }); });
+  yMax = niceMax(yMax * 1.05);
+  const X = function (x) { return L + (x - opt.xMin) / (opt.xMax - opt.xMin) * (W - L - R); }; // 값 → 가로 위치
+  const Y = function (y) { return H - B - y / yMax * (H - T - B); };                          // 값 → 세로 위치
+
+  // 눈금과 격자
+  ctx.font = "16px sans-serif"; ctx.fillStyle = "#222"; ctx.strokeStyle = "#ddd"; ctx.lineWidth = 1;
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (let i = 0; i <= 5; i++) {
+    const yv = yMax * i / 5;
+    ctx.beginPath(); ctx.moveTo(L, Y(yv)); ctx.lineTo(W - R, Y(yv)); ctx.stroke();
+    ctx.fillText(Number(yv.toFixed(2)), L - 8, Y(yv));
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let xv = opt.xMin; xv <= opt.xMax + 1e-9; xv += opt.xStep) {
+    ctx.beginPath(); ctx.moveTo(X(xv), T); ctx.lineTo(X(xv), H - B); ctx.stroke();
+    ctx.fillText(xv, X(xv), H - B + 6);
+  }
+  // 축
+  ctx.strokeStyle = "#111"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, H - B); ctx.lineTo(W - R, H - B); ctx.stroke();
+  ctx.font = "bold 17px sans-serif";
+  ctx.fillText(opt.xLabel, (L + W - R) / 2, H - 26);
+  ctx.save(); ctx.translate(20, (T + H - B) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textBaseline = "middle"; ctx.fillText(opt.yLabel, 0, 0); ctx.restore();
+
+  // 현재 입력값 위치 (회색 점선)
+  ctx.strokeStyle = "#888"; ctx.setLineDash([4, 4]); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(X(opt.current), T); ctx.lineTo(X(opt.current), H - B); ctx.stroke();
+  ctx.setLineDash([]); ctx.fillStyle = "#555"; ctx.font = "15px sans-serif";
+  const nearRight = X(opt.current) > W - R - 50;                  // 오른쪽 끝이면 글자를 왼쪽에
+  ctx.textAlign = nearRight ? "right" : "left";
+  ctx.fillText("현재", X(opt.current) + (nearRight ? -4 : 4), T);
+
+  // 선 그리기
+  opt.series.forEach(function (s) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = 3.5; ctx.setLineDash(s.dash || []);
+    ctx.beginPath();
+    s.points.forEach(function (pt, i) {
+      if (i === 0) ctx.moveTo(X(pt[0]), Y(pt[1])); else ctx.lineTo(X(pt[0]), Y(pt[1]));
+    });
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+}
+
+// 범례 만들기: items = [{color, dash, text}]
+function drawLegend(id, items) {
+  document.getElementById(id).innerHTML = items.map(function (it) {
+    const style = it.dash && it.dash.length ? "dashed" : "solid";
+    return '<span><span class="sw" style="border-top:4px ' + style + ' ' + it.color + '"></span>' + it.text + "</span>";
+  }).join("");
+}
+
+const COLORS = { A: "#111111", B: "#1f77b4", C: "#2ca02c", D: "#ff7f0e", E: "#9467bd", F: "#d62728" };
+const DASHES = { A: [], B: [10, 6], C: [], D: [10, 6], E: [], F: [3, 4] };
+
+// 입력이 바뀔 때마다 전부 다시 계산
+function update() {
+  showValues();
+  const x = readInputs();
+  const warn = checkInputs(x);
+  const wbox = document.getElementById("warning");
+
+  if (warn) { // 경고: 결과와 그래프를 비움
+    wbox.style.display = "block"; wbox.textContent = "⚠ " + warn + " 결과를 계산하지 않습니다.";
+    ["outNear", "outFar", "outAll", "outN"].forEach(function (id) { document.getElementById(id).textContent = "—"; });
+    ["g1", "g2"].forEach(function (id) { drawGraph(id, { message: "입력값을 확인하세요" }); });
+    ["lg1", "lg2"].forEach(function (id) { document.getElementById(id).innerHTML = ""; });
+    return;
+  }
+  wbox.style.display = "none";
+
+  // 결과 카드
+  const r = model(x);
+  document.getElementById("outNear").textContent = (r.Pnear * 100).toFixed(1) + "%";
+  document.getElementById("outFar").textContent = (r.Pfar * 100).toFixed(1) + "%";
+  document.getElementById("outN").textContent = r.N.toFixed(2) + "명";
+  const pAll = overallP(r, x);
+  document.getElementById("outAll").textContent = (pAll === null) ? "—" : (pAll * 100).toFixed(1) + "%";
+
+  // 그래프 1: 환기 횟수 1~24
+  const near1 = [], far1 = [];
+  for (let a = 1; a <= 24; a++) {
+    const rr = model(Object.assign({}, x, { a: a }));
+    near1.push([a, rr.Pnear * 100]);
+    far1.push([a, rr.Pfar * 100]);
+  }
+  drawGraph("g1", { xMin: 0, xMax: 24, xStep: 2, xLabel: "시간당 환기 횟수 (회/h)", yLabel: "감염 확률 (%)",
+                    current: x.a, series: [{ color: "#d62728", points: near1 }, { color: "#1f77b4", dash: [10, 6], points: far1 }] });
+  drawLegend("lg1", [{ color: "#d62728", text: "P근 (옆자리)" }, { color: "#1f77b4", dash: [10, 6], text: "P원 (먼 자리)" }]);
+
+  // 그래프 2: 선별 성공률 0~100%, 설계 A~F
+  const series2 = [], legend2 = [];
+  Object.keys(DESIGNS).forEach(function (k) {
+    const d = DESIGNS[k];
+    if (d.triage && x.tb > x.T) { // 분류 설계는 tb > T면 계산할 수 없음
+      legend2.push({ color: COLORS[k], dash: DASHES[k], text: d.name + ": 계산 불가 (tb > T)" });
+      return;
+    }
+    const pts = [];
+    let worst = 0;
+    for (let s = 0; s <= 100; s += 2) {
+      const rr = model(Object.assign({}, x, { a: d.a, triage: d.triage, h: d.h, s: s / 100 }));
+      pts.push([s, rr.N]);
+      if (rr.N > worst) worst = rr.N;
+    }
+    series2.push({ color: COLORS[k], dash: DASHES[k], points: pts });
+    legend2.push({ color: COLORS[k], dash: DASHES[k], text: d.name + " (최대 " + worst.toFixed(2) + "명)" });
+  });
+  drawGraph("g2", { xMin: 0, xMax: 100, xStep: 10, xLabel: "선별 성공률 (%)", yLabel: "예상 2차 감염자 수 N (명)",
+                    current: x.s * 100, series: series2 });
+  drawLegend("lg2", legend2);
+
+}
+
+// 테스트 실행 후 표로 보여 주기
+function runTests() {
+  let passCount = 0;
+  let html = "<table><tr><th>번호</th><th>조건</th><th>항목</th><th>기댓값</th><th>계산값</th><th>결과</th></tr>";
+  TESTS.forEach(function (t) {
+    const res = runOneTest(t);
+    if (res.pass) passCount++;
+    const unit = res.isProb ? "%" : "명";
+    const name = { Pnear: "P근", Pfar: "P원", N: "N" }[t.key];
+    html += "<tr><td>" + t.no + "</td><td>" + t.desc + "</td><td>" + name + "</td><td>" + t.exp.toFixed(res.isProb ? 1 : 2) + unit +
+            "</td><td>" + res.raw.toFixed(res.isProb ? 2 : 3) + unit + "</td><td class='" + (res.pass ? "pass'>통과" : "fail'>실패") + "</td></tr>";
+  });
+  html += "</table><p><b>" + TESTS.length + "개 중 " + passCount + "개 통과</b></p>";
+  document.getElementById("testResult").innerHTML = html;
+}
+
+buildInputs();
+update();
+window.addEventListener("resize", update); // 창 크기가 바뀌면 그래프 다시 그리기
+</script>
+</body>
+</html>
